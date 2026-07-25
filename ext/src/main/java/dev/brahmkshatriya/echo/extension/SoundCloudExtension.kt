@@ -10,6 +10,7 @@ import dev.brahmkshatriya.echo.common.clients.LoginClient
 import dev.brahmkshatriya.echo.common.clients.PlaylistClient
 import dev.brahmkshatriya.echo.common.clients.QuickSearchClient
 import dev.brahmkshatriya.echo.common.clients.RadioClient
+import dev.brahmkshatriya.echo.common.clients.SearchFeedClient
 import dev.brahmkshatriya.echo.common.clients.TrackClient
 import dev.brahmkshatriya.echo.common.helpers.ContinuationCallback.Companion.await
 import dev.brahmkshatriya.echo.common.helpers.WebViewRequest
@@ -43,7 +44,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 
-class SoundCloudExtension : ExtensionClient, QuickSearchClient, TrackClient,
+class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient, TrackClient,
     HomeFeedClient, LibraryFeedClient, LoginClient.WebView, ArtistClient,
     PlaylistClient, RadioClient, LikeClient, FollowClient {
 
