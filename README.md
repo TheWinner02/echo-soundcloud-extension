@@ -17,7 +17,7 @@ The file will have the following properties:
 - `extId` - The id of the extension. (Do not use spaces or special characters)
 - `extClass` - The class of the extension. This should be the class that you inherit client
   interfaces to. For example in this template, it
-  is [`TestExtension`](ext/src/main/java/dev/brahmkshatriya/echo/extension/TestExtension.kt).
+  is [`SoundCloudExtension`](ext/src/main/java/dev/brahmkshatriya/echo/extension/SoundCloudExtension.kt).
 - `extIcon` - (Optional) The icon of the extension. Will be cropped into a circle.
 - `extName` - The name of the extension.
 - `extDescription` - The description of the extension.
@@ -34,7 +34,7 @@ Here's where the fun begins. Echo checks for `Client` interfaces that your exten
   - These are interfaces that include functions your extension need to implement (`override fun`).
   - For example, if you want to create a lyrics extension, you need to implement the `LyricsClient` interface.
 - What interfaces are available?
-  - By default, the [`TestExtension`](ext/src/main/java/dev/brahmkshatriya/echo/extension/TestExtension.kt) implements the `ExtensionClient` interface.
+  - By default, the [`SoundCloudExtension`](ext/src/main/java/dev/brahmkshatriya/echo/extension/SoundCloudExtension.kt) implements the `ExtensionClient` interface.
   - Pro tip: Hover over the interface to see the documentation, Click on every one things that is clickable to dive deep into the rabbit hole.
   - You can find all the available interfaces, for:
       - Music Extension - [here](https://github.com/brahmkshatriya/echo/blob/main/common/src/main/java/dev/brahmkshatriya/echo/common/Extension.kt#L65-L117)

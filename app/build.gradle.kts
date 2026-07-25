@@ -32,11 +32,10 @@ val extAuthorUrl: String? by project
 val extRepoUrl: String? by project
 val extUpdateUrl: String? by project
 
-val gitHash = execute("git", "rev-parse", "HEAD").take(7)
-val gitCount = execute("git", "rev-list", "--count", "HEAD").toInt()
-val verCode = gitCount
-val verName = "v$gitHash"
-
+val verCode = (project.findProperty("extVersionCode") as? String)?.toIntOrNull()
+    ?: runCatching { execute("git", "rev-list", "--count", "HEAD").toInt() }.getOrDefault(1)
+val verName = (project.findProperty("extVersionName") as? String)
+    ?: runCatching { "v" + execute("git", "rev-parse", "HEAD").take(7) }.getOrDefault("v1.0.0")
 
 val outputDir = file("${layout.buildDirectory.asFile.get()}/generated/proguard")
 val generatedProguard = file("${outputDir}/generated-rules.pro")
@@ -59,11 +58,13 @@ tasks.named("preBuild") {
 
 android {
     namespace = "dev.brahmkshatriya.echo.extension"
-    compileSdk = 36
+    compileSdk = 37
     defaultConfig {
         applicationId = "dev.brahmkshatriya.echo.extension.$extId"
         minSdk = 24
         targetSdk = 36
+        versionCode = verCode
+        versionName = verName
 
         manifestPlaceholders.apply {
             put("type", "dev.brahmkshatriya.echo.${extType}")
@@ -85,6 +86,7 @@ android {
     buildTypes {
         all {
             isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 generatedProguard.absolutePath

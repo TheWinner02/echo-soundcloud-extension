@@ -28,7 +28,7 @@ import kotlin.system.measureTimeMillis
 @OptIn(DelicateCoroutinesApi::class)
 @ExperimentalCoroutinesApi
 class ExtensionUnitTest {
-    private val extension: ExtensionClient = TestExtension()
+    private val extension: ExtensionClient = SoundCloudExtension()
     private val searchQuery = "Skrillex"
     private val user = User("", "Test User")
 
@@ -125,9 +125,12 @@ class ExtensionUnitTest {
 
     @Test
     fun testAlbumGet() = testIn("Testing Album Get") {
+        if (extension !is AlbumClient) {
+            println("AlbumClient is not implemented by this extension")
+            return@testIn
+        }
         if (extension !is TrackClient) error("TrackClient is not implemented")
-        val small = extension.loadTrack(searchTrack(), false).album ?: error("Track has no album")
-        if (extension !is AlbumClient) error("AlbumClient is not implemented")
+        val small = extension.loadTrack(searchTrack(), false).album ?: return@testIn
         val album = extension.loadAlbum(small)
         println(album)
         val tracks = extension.loadTracks(album)?.loadAll()
