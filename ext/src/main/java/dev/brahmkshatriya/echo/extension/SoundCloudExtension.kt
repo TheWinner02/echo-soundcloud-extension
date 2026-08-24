@@ -51,7 +51,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
     private val httpClient = OkHttpClient()
     private lateinit var setting: Settings
     private val json = Json { ignoreUnknownKeys = true }
-    private var clientId = "tkIWLs4MIowq7bCXP80TOwx6DnDa7UPc"
+    private var clientId = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
 
     private var currentUser: User? = null
     private var oauthToken: String? = null
@@ -87,9 +87,10 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                 val script = httpClient.newCall(
                     Request.Builder().url(scriptUrl).build()
                 ).await().use { it.body.string() }
-                val id = Regex("""client_id\s*:\s*"([a-zA-Z0-9]+)"""")
+                val id = Regex("""client_id[:=]\s*["']([a-zA-Z0-9]{30,34})["']""")
                     .find(script)?.groupValues?.get(1) ?: continue
                 clientId = id
+                println("SoundCloudExtension: Client ID refreshed: $id")
                 if (::setting.isInitialized) {
                     setting.putString("client_id", id)
                 }
@@ -534,18 +535,79 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
 
     // ---- TRACK ----
 
-    override suspend fun loadTrack(track: Track, isDownload: Boolean): Track = track
+    override suspend fun loadTrack(track: Track, isDownload: Boolean): Track {
+        if (track.streamables.isNotEmpty()) return track
+        val url = "https://api-v2.soundcloud.com/tracks/${track.id}?client_id=$clientId"
+        val res = httpClient.newCall(Request.Builder().url(url).withAuth().build()).await()
+        val body = res.use { if (it.isSuccessful) it.body.string() else null } ?: return track
+        return runCatching {
+            json.parseToJsonElement(body).jsonObject.toTrack() ?: track
+        }.getOrDefault(track)
+    }
 
     override suspend fun loadStreamableMedia(streamable: Streamable, isDownload: Boolean): Streamable.Media {
-        val separator = if (streamable.id.contains("?")) "&" else "?"
-        val url = "${streamable.id}${separator}client_id=$clientId"
-        val builder = Request.Builder().url(url)
-        oauthToken?.let { builder.header("Authorization", "OAuth $it") }
-        val body = httpClient.newCall(builder.build()).await().use { it.body.string() }
-        if (body.isNullOrBlank()) throw Exception("Empty stream response")
-        val streamUrl = json.parseToJsonElement(body).jsonObject["url"]?.jsonPrimitive?.contentOrNull
-            ?: throw Exception("No stream URL in response")
-        val isHls = streamable.id.contains("hls")
+        suspend fun resolveMediaUrl(targetUrl: String): String? {
+            val separator = if (targetUrl.contains("?")) "&" else "?"
+            val fullUrl = "${targetUrl}${separator}client_id=$clientId"
+
+            var resp = httpClient.newCall(Request.Builder().url(fullUrl).withAuth().build()).await()
+            var body = resp.use { if (it.isSuccessful) it.body.string() else null }
+
+            if (body.isNullOrBlank() && oauthToken != null) {
+                resp = httpClient.newCall(Request.Builder().url(fullUrl).build()).await()
+                body = resp.use { if (it.isSuccessful) it.body.string() else null }
+            }
+
+            if (body.isNullOrBlank()) return null
+            return runCatching {
+                json.parseToJsonElement(body).jsonObject["url"]?.jsonPrimitive?.contentOrNull
+            }.getOrNull()
+        }
+
+        suspend fun resolveWithRetry(targetUrl: String): String? {
+            var res = resolveMediaUrl(targetUrl)
+            if (res == null) {
+                refreshClientId()
+                res = resolveMediaUrl(targetUrl)
+            }
+            return res
+        }
+
+        var streamUrl: String? = null
+        val targetId = streamable.id
+
+        if (targetId.startsWith("http")) {
+            streamUrl = resolveWithRetry(targetId)
+        }
+
+        if (streamUrl == null) {
+            val trackId = Regex("""tracks[:/](\d+)""").find(targetId)?.groupValues?.get(1) ?: targetId
+            val trackApiUrl = "https://api-v2.soundcloud.com/tracks/$trackId?client_id=$clientId"
+            val trackResp = httpClient.newCall(Request.Builder().url(trackApiUrl).build()).await()
+            val trackBody = trackResp.use { if (it.isSuccessful) it.body.string() else null }
+            if (!trackBody.isNullOrBlank()) {
+                val transcodings = runCatching {
+                    json.parseToJsonElement(trackBody).jsonObject["media"]?.jsonObject?.get("transcodings")?.jsonArray
+                }.getOrNull()
+
+                if (transcodings != null) {
+                    for (t in transcodings) {
+                        val transUrl = t.jsonObject["url"]?.jsonPrimitive?.contentOrNull ?: continue
+                        val resolved = resolveMediaUrl(transUrl)
+                        if (resolved != null) {
+                            streamUrl = resolved
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        if (streamUrl == null) {
+            throw Exception("Failed to resolve stream URL from SoundCloud for '$targetId'")
+        }
+
+        val isHls = streamUrl.contains(".m3u8") || streamable.id.contains("hls")
         return if (isHls) streamUrl.toServerMedia(type = Streamable.SourceType.HLS)
         else streamUrl.toServerMedia()
     }
@@ -568,20 +630,41 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
             cover = user["avatar_url"]?.jsonPrimitive?.contentOrNull?.toImageHolder()
         )
         val transcodings = this["media"]?.jsonObject?.get("transcodings")?.jsonArray
-        var streamUrl = ""
         val isSnip = this["policy"]?.jsonPrimitive?.contentOrNull == "SNIP"
 
+        val streamables = mutableListOf<Streamable>()
         transcodings?.forEach { t ->
             val obj = t.jsonObject
-            val protocol = obj["format"]?.jsonObject?.get("protocol")?.jsonPrimitive?.contentOrNull
-            if (protocol == "progressive" && streamUrl.isEmpty())
-                streamUrl = obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
-        }
-        if (streamUrl.isEmpty()) {
-            transcodings?.forEach { t ->
-                val obj = t.jsonObject
-                val protocol = obj["format"]?.jsonObject?.get("protocol")?.jsonPrimitive?.contentOrNull
-                if (protocol == "hls") streamUrl = obj["url"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            val url = obj["url"]?.jsonPrimitive?.contentOrNull
+            val format = obj["format"]?.jsonObject
+            val protocol = format?.get("protocol")?.jsonPrimitive?.contentOrNull
+            val mime = format?.get("mime_type")?.jsonPrimitive?.contentOrNull
+            val preset = obj["preset"]?.jsonPrimitive?.contentOrNull
+            val qualityStr = obj["quality"]?.jsonPrimitive?.contentOrNull
+
+            if (!url.isNullOrEmpty()) {
+                val codec = when {
+                    mime?.contains("opus") == true || preset?.contains("opus") == true -> "Opus"
+                    mime?.contains("mp4") == true || mime?.contains("aac") == true || preset?.contains("aac") == true -> "AAC"
+                    mime?.contains("mpeg") == true || preset?.contains("mp3") == true -> "MP3"
+                    else -> "Audio"
+                }
+                val bitrate = when {
+                    qualityStr == "hq" -> "256 kbps"
+                    codec == "Opus" -> "160 kbps"
+                    codec == "AAC" -> "160 kbps"
+                    else -> "128 kbps"
+                }
+                val streamType = if (protocol == "progressive") "Progressive" else "HLS"
+                val title = "$codec $bitrate ($streamType)"
+                val qualityInt = when {
+                    qualityStr == "hq" -> 256
+                    codec == "Opus" -> 160
+                    codec == "AAC" -> 160
+                    protocol == "progressive" -> 128
+                    else -> 120
+                }
+                streamables.add(Streamable.server(id = url, quality = qualityInt, title = title))
             }
         }
 
@@ -590,9 +673,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
             cover = artwork?.toImageHolder(), duration = duration,
             isLikeable = oauthToken != null,
             extras = if (isSnip) mapOf("snip" to "true") else emptyMap(),
-            streamables = if (streamUrl.isNotEmpty())
-                listOf(Streamable.server(id = streamUrl, quality = 0))
-            else emptyList()
+            streamables = streamables
         )
     }
 
