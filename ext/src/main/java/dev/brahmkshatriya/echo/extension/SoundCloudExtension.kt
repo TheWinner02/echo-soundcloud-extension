@@ -668,12 +668,16 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
             }
         }
 
+        val uniqueStreamables = streamables
+            .distinctBy { it.title }
+            .sortedByDescending { it.quality }
+
         return Track(
             id = id, title = title, artists = listOf(artist),
             cover = artwork?.toImageHolder(), duration = duration,
             isLikeable = oauthToken != null,
             extras = if (isSnip) mapOf("snip" to "true") else emptyMap(),
-            streamables = streamables
+            streamables = uniqueStreamables
         )
     }
 
