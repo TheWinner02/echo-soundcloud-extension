@@ -1,5 +1,7 @@
 package dev.brahmkshatriya.echo.extension
 
+import dev.brahmkshatriya.echo.common.providers.GlobalSettingsProvider
+
 import dev.brahmkshatriya.echo.common.clients.ArtistClient
 import dev.brahmkshatriya.echo.common.clients.ExtensionClient
 import dev.brahmkshatriya.echo.common.clients.FollowClient
@@ -46,7 +48,11 @@ import java.net.URLEncoder
 
 class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient, TrackClient,
     HomeFeedClient, LibraryFeedClient, LoginClient.WebView, ArtistClient,
-    PlaylistClient, RadioClient, LikeClient, FollowClient {
+    PlaylistClient, RadioClient, LikeClient, FollowClient, GlobalSettingsProvider {
+    override fun setGlobalSettings(globalSettings: Settings) {
+        ExtensionText.settings = globalSettings
+    }
+
 
     private val httpClient = OkHttpClient()
     private lateinit var setting: Settings
@@ -60,8 +66,8 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
     override suspend fun getSettingItems(): List<Setting> = listOf(
         SettingSwitch(
             key = "hide_snip",
-            title = "Hide Preview-Only Tracks",
-            summary = "Hide tracks that only play a 30-second preview (Go+ tracks)",
+            title = ExtensionText.get("providers.hide_preview_only_tracks_09a698", "Hide Preview-Only Tracks"),
+            summary = ExtensionText.get("providers.hide_tracks_that_only_play_a_30_second_preview_g_3b319d", "Hide tracks that only play a 30-second preview (Go+ tracks)"),
             defaultValue = false
         )
     )
@@ -226,7 +232,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                         ?.filter { !hideSnip || !it.extras.containsKey("snip") }
                         .orEmpty()
                     if (tracks.isNotEmpty())
-                        shelves.add(Shelf.Lists.Tracks(id = "recently_played", title = "Recently Played", list = tracks))
+                        shelves.add(Shelf.Lists.Tracks(id = "recently_played", title = ExtensionText.get("providers.recently_played_2344da", "Recently Played"), list = tracks))
                 }
             }
 
@@ -246,7 +252,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                         }?.filter { !hideSnip || !it.extras.containsKey("snip") }
                         .orEmpty()
                     if (tracks.isNotEmpty())
-                        shelves.add(Shelf.Lists.Tracks(id = "your_stream", title = "Your Stream", list = tracks))
+                        shelves.add(Shelf.Lists.Tracks(id = "your_stream", title = ExtensionText.get("providers.your_stream_930dee", "Your Stream"), list = tracks))
                 }
             }
         }
@@ -263,7 +269,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     ?.filter { !hideSnip || !it.extras.containsKey("snip") }
                     .orEmpty()
                 if (tracks.isNotEmpty())
-                    shelves.add(Shelf.Lists.Tracks(id = "trending", title = "Trending", list = tracks))
+                    shelves.add(Shelf.Lists.Tracks(id = "trending", title = ExtensionText.get("providers.trending_5e1a0e", "Trending"), list = tracks))
             }
         }
 
@@ -292,7 +298,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     }?.filter { !hideSnip || !it.extras.containsKey("snip") }
                     .orEmpty()
                 if (tracks.isNotEmpty())
-                    shelves.add(Shelf.Lists.Tracks(id = "liked_tracks", title = "Liked Tracks", list = tracks))
+                    shelves.add(Shelf.Lists.Tracks(id = "liked_tracks", title = ExtensionText.get("providers.liked_tracks_8268ae", "Liked Tracks"), list = tracks))
             }
         }
 
@@ -308,7 +314,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     .orEmpty()
                 if (playlists.isNotEmpty())
                     shelves.add(Shelf.Lists.Items(
-                        id = "playlists", title = "Playlists",
+                        id = "playlists", title = ExtensionText.get("providers.playlists_dcd0a4", "Playlists"),
                         list = playlists.map { it.toShelf().media }
                     ))
             }
@@ -353,7 +359,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     ?.filter { !hideSnip || !it.extras.containsKey("snip") }
                     .orEmpty()
                 if (tracks.isNotEmpty())
-                    shelves.add(Shelf.Lists.Tracks(id = "search_tracks", title = "Tracks", list = tracks))
+                    shelves.add(Shelf.Lists.Tracks(id = "search_tracks", title = ExtensionText.get("providers.tracks_889801", "Tracks"), list = tracks))
             }
         }
 
@@ -369,7 +375,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     .orEmpty()
                 if (playlists.isNotEmpty())
                     shelves.add(Shelf.Lists.Items(
-                        id = "search_playlists", title = "Playlists",
+                        id = "search_playlists", title = ExtensionText.get("providers.playlists_dcd0a4", "Playlists"),
                         list = playlists.map { it.toShelf().media }
                     ))
             }
@@ -387,7 +393,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     .orEmpty()
                 if (artists.isNotEmpty())
                     shelves.add(Shelf.Lists.Items(
-                        id = "search_users", title = "Users",
+                        id = "search_users", title = ExtensionText.get("providers.users_6b0cc9", "Users"),
                         list = artists.map { it.toShelf().media }
                     ))
             }
@@ -410,7 +416,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
             name = name,
             cover = root["avatar_url"]?.jsonPrimitive?.contentOrNull?.replace("large", "t500x500")?.toImageHolder() ?: artist.cover,
             bio = root["description"]?.jsonPrimitive?.contentOrNull,
-            subtitle = root["followers_count"]?.jsonPrimitive?.longOrNull?.let { if (it > 0) "$it followers" else null },
+            subtitle = root["followers_count"]?.jsonPrimitive?.longOrNull?.let { if (it > 0) ExtensionText.get("providers.1_d_followers_5d1551", "%1\$d followers", it) else null },
             isFollowable = oauthToken != null
         )
     }
@@ -429,7 +435,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     ?.filter { !hideSnip || !it.extras.containsKey("snip") }
                     .orEmpty()
                 if (tracks.isNotEmpty())
-                    shelves.add(Shelf.Lists.Tracks(id = "artist_tracks", title = "Tracks", list = tracks))
+                    shelves.add(Shelf.Lists.Tracks(id = "artist_tracks", title = ExtensionText.get("providers.tracks_889801", "Tracks"), list = tracks))
             }
         }
 
@@ -444,7 +450,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                     .orEmpty()
                 if (playlists.isNotEmpty())
                     shelves.add(Shelf.Lists.Items(
-                        id = "artist_playlists", title = "Playlists",
+                        id = "artist_playlists", title = ExtensionText.get("providers.playlists_dcd0a4", "Playlists"),
                         list = playlists.map { it.toShelf().media }
                     ))
             }
@@ -511,7 +517,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
     override suspend fun radio(item: EchoMediaItem, context: EchoMediaItem?): Radio {
         return Radio(
             id = item.id,
-            title = "Radio: ${item.title}",
+            title = ExtensionText.get("providers.radio_1_s_736db9", "Radio: %1\$s", item.title),
             cover = item.cover,
             extras = mapOf("seed_id" to item.id)
         )
@@ -623,7 +629,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
         val artwork = this["artwork_url"]?.jsonPrimitive?.contentOrNull?.replace("large", "t500x500")
         val user = this["user"]?.jsonObject ?: return null
         val userId = user["id"]?.jsonPrimitive?.longOrNull?.toString() ?: return null
-        val username = user["username"]?.jsonPrimitive?.contentOrNull ?: "Unknown Artist"
+        val username = user["username"]?.jsonPrimitive?.contentOrNull ?: ExtensionText.get("providers.unknown_artist_fc0fb2", "Unknown Artist")
         val artist = Artist(
             id = userId,
             name = username,
@@ -713,7 +719,7 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
             id = id,
             name = name,
             cover = this["avatar_url"]?.jsonPrimitive?.contentOrNull?.replace("large", "t500x500")?.toImageHolder(),
-            subtitle = this["followers_count"]?.jsonPrimitive?.longOrNull?.let { if (it > 0) "$it followers" else null },
+            subtitle = this["followers_count"]?.jsonPrimitive?.longOrNull?.let { if (it > 0) ExtensionText.get("providers.1_d_followers_5d1551", "%1\$d followers", it) else null },
             isFollowable = oauthToken != null
         )
     }
