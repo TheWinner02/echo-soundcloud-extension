@@ -46,15 +46,14 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.net.URLEncoder
 
-class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient, TrackClient,
-    HomeFeedClient, LibraryFeedClient, LoginClient.WebView, ArtistClient,
+class SoundCloudExtension(private val httpClient: OkHttpClient = OkHttpClient()) : ExtensionClient, QuickSearchClient, SearchFeedClient, TrackClient,
+    HomeFeedClient, LibraryFeedClient, LoginClient.WebView, LoginClient.CustomInput, ArtistClient,
     PlaylistClient, RadioClient, LikeClient, FollowClient, GlobalSettingsProvider {
     override fun setGlobalSettings(globalSettings: Settings) {
         ExtensionText.settings = globalSettings
     }
 
 
-    private val httpClient = OkHttpClient()
     private lateinit var setting: Settings
     private val json = Json { ignoreUnknownKeys = true }
     private var clientId = "Pb72ranhoyt6gw7hM7TkzUItXlMWSNSo"
@@ -96,7 +95,6 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
                 val id = Regex("""client_id[:=]\s*["']([a-zA-Z0-9]{30,34})["']""")
                     .find(script)?.groupValues?.get(1) ?: continue
                 clientId = id
-                println("SoundCloudExtension: Client ID refreshed: $id")
                 if (::setting.isInitialized) {
                     setting.putString("client_id", id)
                 }
@@ -115,42 +113,78 @@ class SoundCloudExtension : ExtensionClient, QuickSearchClient, SearchFeedClient
     // ---- LOGIN ----
 
     override val webViewRequest = object : WebViewRequest.Cookie<List<User>> {
-        override val initialUrl = NetworkRequest("https://soundcloud.com/signin")
-        override val stopUrlRegex = Regex("soundcloud\\.com/discover|soundcloud\\.com/feed|soundcloud\\.com/you")
+        override val initialUrl = NetworkRequest("https://soundcloud.com/signin",
+            mapOf("X-Echo-WebView-Profile" to "soundcloud-login-v1"))
+        override val maxTimeout = 10 * 60_000L
+        override val dontCache = true
+        override val stopUrlRegex = Regex("^https://(?:www\\.)?soundcloud\\.com/(?:discover|feed|you|stream|library)(?:[/?#].*)?$", RegexOption.IGNORE_CASE)
 
         override suspend fun onStop(url: NetworkRequest, cookie: String): List<User>? {
-            val token = cookie.split(";")
-                .map { it.trim() }
-                .firstOrNull { it.startsWith("auth_token=") || it.startsWith("oauth_token=") }
-                ?.split("=", limit = 2)?.getOrNull(1)?.trim()?.removeSurrounding("\"")
-                ?: return null
+            val token = SoundCloudSession.cookieToken(cookie) ?: return null
+            val mobile = runCatching { java.net.URI(url.url).host == "m.soundcloud.com" }.getOrDefault(false)
+            return authenticate(token, SoundCloudSession.clientId(url.headers["X-Echo-SoundCloud-Client-Id"]), mobile)
+        }
+    }
 
-            oauthToken = token
+    private suspend fun authenticate(token: String, browserClientId: String? = null, mobile: Boolean = false): List<User> {
+        // The website's own session may require its v2 endpoint. The public API is a fallback.
+        val effectiveClientId = browserClientId ?: clientId
+        val endpoints = (if (mobile) listOf("https://api-mobi.soundcloud.com/me?client_id=$effectiveClientId") else emptyList()) +
+            listOf("https://api-v2.soundcloud.com/me?client_id=$effectiveClientId", "https://api.soundcloud.com/me")
+        for (endpoint in endpoints) {
+            val body = httpClient.newCall(Request.Builder().url(endpoint)
+                .header("Authorization", "OAuth $token").header("Accept", "application/json").build())
+                .await().use { response ->
+                    if (response.code in setOf(401, 403, 404, 405)) {
+                        null
+                    } else {
+                        check(response.isSuccessful) { "SoundCloud login verification failed (HTTP ${response.code})" }
+                        response.body.string()
+                    }
+                } ?: continue
+            val root = json.parseToJsonElement(body).jsonObject
+            val id = root["id"]?.jsonPrimitive?.longOrNull?.takeIf { it > 0 }?.toString() ?: continue
+            val name = root["username"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: continue
+            val user = User(id, name, cover = root["avatar_url"]?.jsonPrimitive?.contentOrNull?.toImageHolder(),
+                extras = mapOf("auth_token" to token))
+            // Commit only a verified user; rejected/cancelled attempts leave the previous account intact.
             if (::setting.isInitialized) {
                 setting.putString("auth_token", token)
+                if (browserClientId != null) setting.putString("client_id", browserClientId)
             }
-
-            val body = httpClient.newCall(
-                Request.Builder().url("https://api-v2.soundcloud.com/me?client_id=$clientId")
-                    .withAuth().build()
-            ).await().use { it.body.string() }
-            val root = json.parseToJsonElement(body).jsonObject
-            val id = root["id"]?.jsonPrimitive?.longOrNull?.toString() ?: return null
-            val name = root["username"]?.jsonPrimitive?.contentOrNull ?: return null
-            val user = User(
-                id = id,
-                name = name,
-                cover = root["avatar_url"]?.jsonPrimitive?.contentOrNull?.toImageHolder(),
-                extras = mapOf("auth_token" to token)
-            )
+            clientId = effectiveClientId
+            oauthToken = token
+            currentUser = user
             return listOf(user)
         }
+        throw dev.brahmkshatriya.echo.common.helpers.ClientException.LoginRequired()
+    }
+
+    override val forms: List<LoginClient.Form> get() = listOf(
+        LoginClient.Form(
+            key = "token",
+            label = ExtensionText.get("providers.oauth_token_719abc", "OAuth Token"),
+            icon = LoginClient.InputField.Type.Password,
+            inputFields = listOf(
+                LoginClient.InputField(
+                    type = LoginClient.InputField.Type.Password,
+                    key = "oauth_token",
+                    label = "oauth_token",
+                    isRequired = true
+                )
+            )
+        )
+    )
+
+    override suspend fun onLogin(key: String, data: Map<String, String?>): List<User> {
+        require(key == "token") { "Unknown SoundCloud login method" }
+        val token = SoundCloudSession.inputToken(data["oauth_token"].orEmpty()) ?: error("A valid OAuth token is required")
+        return authenticate(token)
     }
 
     override fun setLoginUser(user: User?) {
         currentUser = user
         oauthToken = user?.extras?.get("auth_token")
-            ?: if (::setting.isInitialized) setting.getString("auth_token") else null
     }
 
     override suspend fun getCurrentUser(): User? = currentUser
