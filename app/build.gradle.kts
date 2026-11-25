@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
 }
 
 dependencies {
@@ -9,28 +8,19 @@ dependencies {
     compileOnly(libs.kotlin.stdlib)
 }
 
-java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-}
+val extType = project.property("extType") as String
+val extId = project.property("extId") as String
+val extClass = project.property("extClass") as String
 
-kotlin {
-    jvmToolchain(21)
-}
+val extIconUrl = project.findProperty("extIconUrl") as? String
+val extName = project.property("extName") as String
+val extDescription = project.findProperty("extDescription") as? String
 
-val extType: String by project
-val extId: String by project
-val extClass: String by project
+val extAuthor = project.property("extAuthor") as String
+val extAuthorUrl = project.findProperty("extAuthorUrl") as? String
 
-val extIconUrl: String? by project
-val extName: String by project
-val extDescription: String? by project
-
-val extAuthor: String by project
-val extAuthorUrl: String? by project
-
-val extRepoUrl: String? by project
-val extUpdateUrl: String? by project
+val extRepoUrl = project.findProperty("extRepoUrl") as? String
+val extUpdateUrl = project.findProperty("extUpdateUrl") as? String
 
 val verCode = (project.findProperty("extVersionCode") as? String)?.toIntOrNull()
     ?: runCatching { execute("git", "rev-list", "--count", "HEAD").toInt() }.getOrDefault(1)
@@ -59,6 +49,12 @@ tasks.named("preBuild") {
 android {
     namespace = "dev.brahmkshatriya.echo.extension"
     compileSdk = 37
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+
     defaultConfig {
         applicationId = "dev.brahmkshatriya.echo.extension.$extId"
         minSdk = 24
